@@ -27,6 +27,19 @@ Simple tree structure for representing a directory tree (in memory) and
 then paths against that tree without re-stating the filesystem.
 """
 
+"""
+Change History
+
+Version 0.2
+  * Fixed DirectoryTree validate function
+    + Added a number of unittests to cover failing cases.
+
+Version 0.1
+  * Initial Release
+"""
+__author__ = "Joshua Graff"
+__version__ = "0.2"
+
 import os
 import sys
 
@@ -61,7 +74,7 @@ class TreeNode(object):
 
     def __repr__(self):
         return "TreeNode('%s')" % str(self)
-    
+
     
 class Tree(object):
 
@@ -177,32 +190,31 @@ class DirectoryTree(Tree):
         return node
 
     def validate(self, path):
-        parts = path.split(os.sep)
-        valid = list()
-        name = parts.pop(0)
-        if name != self.root:
+        """Validate path against this tree and throw an exception if path
+        is invalid.
+        """
+        path = os.path.normpath(path)
+        parts = path.split('/')
+        if parts[0] != self.root:
             mesg = list()
-            mesg.append("'%s' is not valid." % name)
+            mesg.append("'%s' is not valid." % parts[0])
             mesg.append("Valid entries are:")
             mesg.append('  %s' % self.root)
             raise DirectoryTreeError('\n'.join(mesg))
-        valid.append(self.root)
         def visit(node, depth):
-            if not parts:
+            if depth > (len(parts)-1) or node != parts[depth-1]:
                 return
-            name = parts.pop(0)
-            if name not in node.children():
-                path = '/'.join([str(part) for part in valid])
+            if node.children() and parts[depth] not in node.children():
                 mesg = list()
-                mesg.append("'%s/%s' is not valid." % (path, name))
+                mesg.append("'%s' is not valid." % '/'.join(parts[:depth+1]))
                 mesg.append("Valid entries are:")
                 for child in node.children():
-                    mesg.append('  %s/%s' % (path, child))
+                    mesg.append('  %s/%s' % ('/'.join(parts[:depth]), child))
                 raise DirectoryTreeError('\n'.join(mesg))
-            valid.append(node)
         self.walk(visit)
+        return path
 
-
+        
 import tempfile
 import shutil
 import unittest
@@ -304,6 +316,29 @@ class TestDirectoryTree(unittest.TestCase):
         self.assertEqual(tree.depth, 2)
         self.assertEqual(len(tree.root.children()), 3)
 
+    def test_complex_tree_invalid(self):
+        tree = self.create_complex_tree()
+        self.assertRaises(DirectoryTreeError, tree.validate,
+                          'root/dir_a/foo')
+        self.assertRaises(DirectoryTreeError, tree.validate,
+                          'root/dir_a/dir_b/2')
+
+    def test_complex_tree_valid(self):
+        tree = self.create_complex_tree()
+        tree.validate('root')
+        tree.validate('root/dir_a')
+        tree.validate('root/dir_a/1')
+        tree.validate('root/dir_a/dir_b')
+        tree.validate('root/dir_a/dir_b/1')
+
+    def test_complex_tree_valid_limited_depth(self):
+        tree = self.create_complex_tree(2)
+        tree.validate('root')
+        tree.validate('root/dir_a')
+        tree.validate('root/dir_a/1')
+        tree.validate('root/dir_a/dir_b')
+        tree.validate('root/dir_a/dir_b/1')
+        
         
 def test():
     suite = unittest.TestLoader().loadTestsFromTestCase(TestDirectoryTree)
