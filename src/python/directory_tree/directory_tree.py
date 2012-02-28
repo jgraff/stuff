@@ -30,6 +30,9 @@ then paths against that tree without re-stating the filesystem.
 """
 Change History
 
+Version 0.5
+  * Add support for writing tree to XML and creating tree from XML
+  
 Version 0.4
   * Add only_dirs (tree of directories only) option to DirectoryTree
   
@@ -44,10 +47,11 @@ Version 0.1
   * Initial Release
 """
 __author__ = "Joshua Graff"
-__version__ = "0.4"
+__version__ = "0.5"
 
 import os
 import sys
+from xml.dom import minidom
 
 
 class TreeNode(object):
@@ -80,8 +84,8 @@ class TreeNode(object):
 
     def __repr__(self):
         return "TreeNode('%s')" % str(self)
-
     
+
 class Tree(object):
 
     def __init__(self, root=None):
@@ -98,6 +102,35 @@ class Tree(object):
             for child in node.children():
                 self.walk(visit, child, depth+1)
 
+    def as_xml(self):
+        impl = minidom.getDOMImplementation()
+        doc = impl.createDocument(None, "Tree", None)
+        parents = list()
+        parents.append(doc.documentElement)
+        def visit(node, depth):
+            while depth < len(parents):
+                parents.pop()
+            element = doc.createElement('Node')
+            element.setAttribute('value', str(node))
+            parents[-1].appendChild(element)
+            if node.children():
+                parents.append(element)                
+        self.walk(visit)
+        return doc.toprettyxml()
+
+    def from_xml(self, text):
+        dom = minidom.parseString(text)
+        def _create_tree(element, depth=1):
+            node = TreeNode(element.getAttribute('value'))
+            if depth > self.depth:
+                self.depth = depth
+            for child in element.childNodes:
+                if child.nodeName != 'Node':
+                    continue
+                node.add_child(_create_tree(child, depth+1))
+            return node
+        self.root = _create_tree(dom.documentElement.childNodes[1])
+        
     def as_text(self):
         """Display in ASCII text from left to right.
 
@@ -178,13 +211,33 @@ class DirectoryTreeError(Exception): pass
 
 class DirectoryTree(Tree):
 
-    def __init__(self, path, max_depth=None, only_dirs=False):
+    def __init__(self, path=None, max_depth=None, only_dirs=False):
         Tree.__init__(self)
         self.max_depth = max_depth
-        if not os.path.exists(path):
-            raise DirectoryTreeError("'%s' does not exist" % path)
-        self.root = self.create_tree(path, only_dirs=only_dirs)
+        if path and os.path.isfile(path):
+            fd = open(path)
+            try:
+                self.from_xml(fd.read())
+            finally:
+                fd.close()
+        elif path and os.path.isdir(path):
+            self.from_dir(path, only_dirs=only_dirs)
 
+    def from_dir(self, path, depth=1, only_dirs=False):
+        def _create_tree(rootpath, depth):
+            node = TreeNode(os.path.basename(rootpath))
+            if depth > self.depth:
+                self.depth = depth
+            if os.path.isdir(rootpath) and depth != self.max_depth:
+                for name in os.listdir(rootpath):
+                    subpath = os.path.join(rootpath, name)
+                    if only_dirs and os.path.isfile(subpath):
+                        continue
+                    child = _create_tree(subpath, depth+1)
+                    node.add_child(child)
+            return node
+        self.root = _create_tree(path, depth)
+            
     def create_tree(self, rootpath, depth=1, only_dirs=False):
         node = TreeNode(os.path.basename(rootpath))
         if depth > self.depth:
@@ -280,10 +333,6 @@ class TestDirectoryTree(unittest.TestCase):
                              max_depth,
                              only_dirs=only_dirs)
 
-    def test_path_does_not_exist(self):
-        self.assertRaises(DirectoryTreeError, DirectoryTree,
-                          os.path.join(self.scratch, 'root'))
-        
     def test_simple_tree_dept(self):
         tree = self.create_simple_tree()
         self.assertEqual(tree.depth, 2, "Tree depth mismatch")
@@ -308,20 +357,44 @@ class TestDirectoryTree(unittest.TestCase):
         self.assertRaises(DirectoryTreeError, tree.validate, "not-root")
         self.assertRaises(DirectoryTreeError, tree.validate, "root/b")
 
-    def test_simple_tree_display(self):
+    def test_simple_tree_as_text(self):
         tree = self.create_simple_tree()
         lines = self.create_simple_tree.__doc__.splitlines()
         text = '\n'.join(lines[2:])
         text = textwrap.dedent(text).strip()
         self.assertEqual(tree.as_text(), text)
 
-    def test_complex_tree_display(self):
+    def test_complex_tree_as_text(self):
         tree = self.create_complex_tree()
         lines = self.create_complex_tree.__doc__.splitlines()
         text = '\n'.join(lines[2:])
         text = textwrap.dedent(text).strip()
         self.assertEqual(tree.as_text(), text)
 
+    def test_complex_tree_as_xml(self):
+        tree = self.create_complex_tree()
+        xml = '<?xml version="1.0" ?>\n<Tree>\n\t<Node value="root">' \
+              '\n\t\t<Node value="dir_a">\n\t\t\t<Node value="1"/>' \
+              '\n\t\t\t<Node value="dir_b">\n\t\t\t\t<Node value="1"/>' \
+              '\n\t\t\t</Node>\n\t\t</Node>\n\t\t<Node value="dir_c">' \
+              '\n\t\t\t<Node value="1"/>\n\t\t</Node>\n\t\t' \
+              '<Node value="dir_d"/>\n\t</Node>\n</Tree>\n'
+        self.assertEqual(tree.as_xml(), xml, "XML output mismatch")
+
+    def test_complex_tree_from_xml(self):
+        xml = '<?xml version="1.0" ?>\n<Tree>\n\t<Node value="root">' \
+              '\n\t\t<Node value="dir_a">\n\t\t\t<Node value="1"/>' \
+              '\n\t\t\t<Node value="dir_b">\n\t\t\t\t<Node value="1"/>' \
+              '\n\t\t\t</Node>\n\t\t</Node>\n\t\t<Node value="dir_c">' \
+              '\n\t\t\t<Node value="1"/>\n\t\t</Node>\n\t\t' \
+              '<Node value="dir_d"/>\n\t</Node>\n</Tree>\n'
+        tree = DirectoryTree()
+        tree.from_xml(xml)
+        lines = self.create_complex_tree.__doc__.splitlines()
+        text = '\n'.join(lines[2:])
+        text = textwrap.dedent(text).strip()
+        self.assertEqual(tree.as_text(), text)
+        
     def test_complex_tree_max_depth(self):
         tree = self.create_complex_tree(2)
         self.assertEqual(tree.depth, 2)
@@ -369,13 +442,28 @@ def display(path, depth):
     print tree.as_text()
     return 0
 
+def xml(path, type, depth):
+    if type == 'write':
+        tree = DirectoryTree(path, depth)
+        print tree.as_xml()
+        return 0
+    if type == 'read':
+        tree = DirectoryTree(path, depth)
+        print tree.as_text()
+    
 def usage(prog):
     print __doc__
     print "Usage: %s [display|test] [options]" % prog
-    print "  display PATH [DEPTH] : Graphical representation of PATH"
-    print "                         (default CWD) displayed to DEPTH."
+    print "  display PATH [DEPTH]"
+    print "    Graphical representation of PATH (default CWD) displayed to"
+    print "    DEPTH."
     print
-    print "  test : Run unittests"
+    print "  xml PATH [write|read] [DEPTH]"
+    print "    If 'write' (default) dump an XML file of PATH and if 'read'"
+    print "    display Graphical representation of XML file at PATH"
+    print 
+    print "  test"
+    print "    Run unittests"
     return -1
 
 def main(args):
@@ -391,6 +479,17 @@ def main(args):
         if len(args) >= 4:
             depth = int(args[3])
         return display(path, depth)
+    elif args[1] == 'xml':
+        path = os.getcwd()
+        type = 'write'
+        depth = None
+        if len(args) >= 3:
+            path = args[2]
+        if len(args) >= 4:
+            type = args[3]
+        if len(args) >= 5:
+            depth = args[4]
+        return xml(path, type, depth)
     else:
         return usage(args[0])
     
