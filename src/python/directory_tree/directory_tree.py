@@ -30,6 +30,9 @@ then paths against that tree without re-stating the filesystem.
 """
 Change History
 
+Version 0.3
+  * Remove whitespace from directory paths during validation
+  
 Version 0.2
   * Fixed DirectoryTree validate function
     + Added a number of unittests to cover failing cases.
@@ -38,7 +41,7 @@ Version 0.1
   * Initial Release
 """
 __author__ = "Joshua Graff"
-__version__ = "0.2"
+__version__ = "0.3"
 
 import os
 import sys
@@ -194,7 +197,7 @@ class DirectoryTree(Tree):
         is invalid.
         """
         path = os.path.normpath(path)
-        parts = path.split('/')
+        parts = [part.strip() for part in path.split('/')]
         if parts[0] != self.root:
             mesg = list()
             mesg.append("'%s' is not valid." % parts[0])
