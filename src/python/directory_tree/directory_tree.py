@@ -30,6 +30,9 @@ then paths against that tree without re-stating the filesystem.
 """
 Change History
 
+Version 0.4
+  * Add only_dirs (tree of directories only) option to DirectoryTree
+  
 Version 0.3
   * Remove whitespace from directory paths during validation
   
@@ -41,7 +44,7 @@ Version 0.1
   * Initial Release
 """
 __author__ = "Joshua Graff"
-__version__ = "0.3"
+__version__ = "0.4"
 
 import os
 import sys
@@ -175,21 +178,24 @@ class DirectoryTreeError(Exception): pass
 
 class DirectoryTree(Tree):
 
-    def __init__(self, path, max_depth=None):
+    def __init__(self, path, max_depth=None, only_dirs=False):
         Tree.__init__(self)
         self.max_depth = max_depth
         if not os.path.exists(path):
             raise DirectoryTreeError("'%s' does not exist" % path)
-        self.root = self.create_tree(path)
+        self.root = self.create_tree(path, only_dirs=only_dirs)
 
-    def create_tree(self, rootpath, depth=1):
+    def create_tree(self, rootpath, depth=1, only_dirs=False):
         node = TreeNode(os.path.basename(rootpath))
         if depth > self.depth:
             self.depth = depth
         if os.path.isdir(rootpath) and depth != self.max_depth:
             for name in os.listdir(rootpath):
                 path = os.path.join(rootpath, name)
-                node.add_child(self.create_tree(path, depth+1))
+                if only_dirs and os.path.isfile(path):
+                    continue
+                child = self.create_tree(path, depth+1, only_dirs=only_dirs)
+                node.add_child(child)
         return node
 
     def validate(self, path):
@@ -242,7 +248,7 @@ class TestDirectoryTree(unittest.TestCase):
         os.makedirs(os.path.join(self.scratch, 'root', 'a'))
         return DirectoryTree(os.path.join(self.scratch, 'root'))
 
-    def create_complex_tree(self, max_depth=None):
+    def create_complex_tree(self, max_depth=None, only_dirs=False):
         """Create a complex multi node tree
 
         + root +
@@ -270,7 +276,9 @@ class TestDirectoryTree(unittest.TestCase):
         fd.close()
         fd = open(os.path.join(self.scratch, 'root', 'dir_c', '1'), 'w')
         fd.close()
-        return DirectoryTree(os.path.join(self.scratch, 'root'), max_depth)
+        return DirectoryTree(os.path.join(self.scratch, 'root'),
+                             max_depth,
+                             only_dirs=only_dirs)
 
     def test_path_does_not_exist(self):
         self.assertRaises(DirectoryTreeError, DirectoryTree,
@@ -342,6 +350,14 @@ class TestDirectoryTree(unittest.TestCase):
         tree.validate('root/dir_a/dir_b')
         tree.validate('root/dir_a/dir_b/1')
         
+    def test_complex_tree_only_dirs(self):
+        tree = self.create_complex_tree(only_dirs=True)
+        tree.validate('root')
+        tree.validate('root/dir_a')
+        self.assertRaises(DirectoryTreeError, tree.validate,
+                          'root/dir_a/1')        
+        tree.validate('root/dir_a/dir_b')
+
         
 def test():
     suite = unittest.TestLoader().loadTestsFromTestCase(TestDirectoryTree)
