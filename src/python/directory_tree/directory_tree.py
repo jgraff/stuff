@@ -30,11 +30,18 @@ then paths against that tree without re-stating the filesystem.
 """
 Change History
 
+Version 0.6
+  * Added support for skiping nodes and their children during visitation
+    (raise TreeSkipNode)
+  * Fixed validation in DirectoryTree so that an error is throw
+    if path is valid for the tree but contains files or sub
+    directories beyond that.
+    
 Version 0.5
-  * Add support for writing tree to XML and creating tree from XML
+  * Added support for writing tree to XML and creating tree from XML
   
 Version 0.4
-  * Add only_dirs (tree of directories only) option to DirectoryTree
+  * Added only_dirs (tree of directories only) option to DirectoryTree
   
 Version 0.3
   * Remove whitespace from directory paths during validation
@@ -47,7 +54,7 @@ Version 0.1
   * Initial Release
 """
 __author__ = "Joshua Graff"
-__version__ = "0.5"
+__version__ = "0.6"
 
 import os
 import sys
@@ -84,7 +91,10 @@ class TreeNode(object):
 
     def __repr__(self):
         return "TreeNode('%s')" % str(self)
+
     
+class TreeSkipNode(Exception): pass
+
 
 class Tree(object):
 
@@ -97,8 +107,12 @@ class Tree(object):
     def walk(self, visit, node=None, depth=1):
         if node is None:
             node = self.root
-        visit(node, depth)
-        if node.children():
+        skip = False
+        try:
+            visit(node, depth)
+        except TreeSkipNode:
+            skip = True
+        if not skip:
             for child in node.children():
                 self.walk(visit, child, depth+1)
 
@@ -238,25 +252,13 @@ class DirectoryTree(Tree):
             return node
         self.root = _create_tree(path, depth)
             
-    def create_tree(self, rootpath, depth=1, only_dirs=False):
-        node = TreeNode(os.path.basename(rootpath))
-        if depth > self.depth:
-            self.depth = depth
-        if os.path.isdir(rootpath) and depth != self.max_depth:
-            for name in os.listdir(rootpath):
-                path = os.path.join(rootpath, name)
-                if only_dirs and os.path.isfile(path):
-                    continue
-                child = self.create_tree(path, depth+1, only_dirs=only_dirs)
-                node.add_child(child)
-        return node
-
     def validate(self, path):
         """Validate path against this tree and throw an exception if path
         is invalid.
         """
         path = os.path.normpath(path)
         parts = [part.strip() for part in path.split('/')]
+        valid = list()
         if parts[0] != self.root:
             mesg = list()
             mesg.append("'%s' is not valid." % parts[0])
@@ -264,8 +266,12 @@ class DirectoryTree(Tree):
             mesg.append('  %s' % self.root)
             raise DirectoryTreeError('\n'.join(mesg))
         def visit(node, depth):
-            if depth > (len(parts)-1) or node != parts[depth-1]:
-                return
+            if node != parts[depth-1]:
+                raise TreeSkipNode
+            valid.append(node.value)            
+            if depth > (len(parts)-1):
+                raise TreeSkipNode
+
             if node.children() and parts[depth] not in node.children():
                 mesg = list()
                 mesg.append("'%s' is not valid." % '/'.join(parts[:depth+1]))
@@ -274,9 +280,14 @@ class DirectoryTree(Tree):
                     mesg.append('  %s/%s' % ('/'.join(parts[:depth]), child))
                 raise DirectoryTreeError('\n'.join(mesg))
         self.walk(visit)
-        return path
+        if len(parts) > len(valid):
+            mesg = list()
+            mesg.append("'%s' is not a valid subdirectory or file in '%s'" %
+                        ('/'.join(parts), '/'.join(valid)))
+            raise DirectoryTreeError('\n'.join(mesg))
+        return '/'.join(parts)
 
-        
+
 import tempfile
 import shutil
 import unittest
@@ -356,6 +367,8 @@ class TestDirectoryTree(unittest.TestCase):
         tree = self.create_simple_tree()
         self.assertRaises(DirectoryTreeError, tree.validate, "not-root")
         self.assertRaises(DirectoryTreeError, tree.validate, "root/b")
+        self.assertRaises(DirectoryTreeError, tree.validate, "root/a/1")
+        
 
     def test_simple_tree_as_text(self):
         tree = self.create_simple_tree()
@@ -406,7 +419,9 @@ class TestDirectoryTree(unittest.TestCase):
                           'root/dir_a/foo')
         self.assertRaises(DirectoryTreeError, tree.validate,
                           'root/dir_a/dir_b/2')
-
+        self.assertRaises(DirectoryTreeError, tree.validate,
+                          'root/dir_d/1')
+        
     def test_complex_tree_valid(self):
         tree = self.create_complex_tree()
         tree.validate('root')
@@ -416,12 +431,11 @@ class TestDirectoryTree(unittest.TestCase):
         tree.validate('root/dir_a/dir_b/1')
 
     def test_complex_tree_valid_limited_depth(self):
-        tree = self.create_complex_tree(2)
+        tree = self.create_complex_tree(3)
         tree.validate('root')
         tree.validate('root/dir_a')
         tree.validate('root/dir_a/1')
         tree.validate('root/dir_a/dir_b')
-        tree.validate('root/dir_a/dir_b/1')
         
     def test_complex_tree_only_dirs(self):
         tree = self.create_complex_tree(only_dirs=True)
