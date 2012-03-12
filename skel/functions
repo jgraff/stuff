@@ -1,0 +1,21 @@
+OLD_CWD=$PWD	
+
+buildbot_shell()
+{
+    . $HOME/buildbot/toolchain/bin/activate    
+    OLD_CWD=$PWD
+    cd $HOME/buildbot
+}
+
+# Placeholder in case buildbot_exit_shell is called
+# before buildbot_shell
+deactivate()
+{
+    echo "No active buildbot virtual env shell"
+}
+
+buildbot_exit_shell()
+{
+    deactivate
+    cd $OLD_CWD
+}
