@@ -1,21 +1,21 @@
-OLD_CWD=$PWD	
 
 buildbot_shell()
 {
-    . $HOME/buildbot/toolchain/bin/activate    
-    OLD_CWD=$PWD
-    cd $HOME/buildbot
-}
+    OLD_CWD=$PWD	
+    OLD_PATH=$PATH
+    OLD_LD_LIBRARY_PATH=$LD_LIBRARY_PATH
 
-# Placeholder in case buildbot_exit_shell is called
-# before buildbot_shell
-deactivate()
-{
-    echo "No active buildbot virtual env shell"
+    PATH=$HOME/buildbot/toolchain/bin:$PATH
+    LD_LIBRARY_PATH=$HOME/buildbot/toolchain/lib:$LD_LIBRARY_PATH
+    export PATH LD_LIBRARY_PATH
+
+    cd $HOME/buildbot
 }
 
 buildbot_exit_shell()
 {
-    deactivate
+    PATH=$OLD_PATH
+    LD_LIBRARY_PATH=$OLD_LD_LIBRARY_PATH
+    export PATH LD_LIBRARY_PATH
     cd $OLD_CWD
 }
