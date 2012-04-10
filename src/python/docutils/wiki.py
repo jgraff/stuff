@@ -1,26 +1,3 @@
-# Copyright (c) 2011-2012, Joshua Graff
-# All rights reserved.
-#
-# Redistribution and use in source and binary forms, with or without
-# modification, are permitted provided that the following conditions are met:
-#
-#     1. Redistributions of source code must retain the above copyright notice, this
-#        list of conditions and the following disclaimer.
-#     2. Redistributions in binary form must reproduce the above copyright notice,
-#        this list of conditions and the following disclaimer in the documentation
-#        and/or other materials provided with the distribution.
-#
-# THIS SOFTWARE IS PROVIDED BY THE COPYRIGHT HOLDERS AND CONTRIBUTORS "AS IS" AND
-# ANY EXPRESS OR IMPLIED WARRANTIES, INCLUDING, BUT NOT LIMITED TO, THE IMPLIED
-# WARRANTIES OF MERCHANTABILITY AND FITNESS FOR A PARTICULAR PURPOSE ARE
-# DISCLAIMED. IN NO EVENT SHALL THE COPYRIGHT OWNER OR CONTRIBUTORS BE LIABLE FOR
-# ANY DIRECT, INDIRECT, INCIDENTAL, SPECIAL, EXEMPLARY, OR CONSEQUENTIAL DAMAGES
-# (INCLUDING, BUT NOT LIMITED TO, PROCUREMENT OF SUBSTITUTE GOODS OR SERVICES;
-#  LOSS OF USE, DATA, OR PROFITS; OR BUSINESS INTERRUPTION) HOWEVER CAUSED AND
-# ON ANY THEORY OF LIABILITY, WHETHER IN CONTRACT, STRICT LIABILITY, OR TORT
-# (INCLUDING NEGLIGENCE OR OTHERWISE) ARISING IN ANY WAY OUT OF THE USE OF THIS
-# SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
-
 import os
 
 from docutils import nodes, writers, languages
@@ -63,6 +40,7 @@ class WikiTranslator(nodes.NodeVisitor):
         self.body = list()
         self.context = list()
         self.section_level = 1
+        self.section_refs = dict()
         self.list_level = 0
         self.list_type = list()
         self.emphasis_start = None
@@ -73,6 +51,7 @@ class WikiTranslator(nodes.NodeVisitor):
         self.literal_end = None
         self.title_reference_start = None
         self.title_reference_end = None
+        self.in_literal = False
         self.in_literal_block = False
         self.literal_block_start = None
         self.literal_block_end = None
@@ -88,14 +67,35 @@ class WikiTranslator(nodes.NodeVisitor):
         self.toc = None
         self.block_quote_start = None
         self.block_quote_end = None
+        self.in_definition_list = False
+        self.definition_start = None
+        self.definition_end = None
         self.definition_term_start = None
         self.definition_term_end = None
         self.in_paragraph = False
+        self.footnote_refs = dict()
 
     def astext(self):
+        for idx, item in enumerate(self.body):
+            if not isinstance(item, tuple):
+                continue
+            #
+            # We have encountered a tuple which represents
+            # a function we have to render to extract text.
+            #
+            # Deferred functions like this are often used
+            # to render links which must wait till we walk
+            # the document for link discovery.
+            # 
+            fn = item[0]
+            args = item[1:]
+            text = fn(*args)
+            if not text:
+                text = ''
+            self.body[idx] = text
         return ''.join(self.body)
-
-    def escape(self, text, in_table, in_literal_block):
+    
+    def escape(self, text):
         return text    
 
     def strip(self):
@@ -114,7 +114,7 @@ class WikiTranslator(nodes.NodeVisitor):
         text = node.astext()
         if (self.in_paragraph or self.list_level) and not self.in_literal_block:
             text = text.replace('\n', ' ')
-        text = self.escape(text, self.in_table, self.in_literal_block)
+        text = self.escape(text)
         if self.in_literal_block:
             # Add indent space to all literal blocks. Take into account
             # the depth of a list.
@@ -137,12 +137,12 @@ class WikiTranslator(nodes.NodeVisitor):
     
     def depart_paragraph(self, node):
         # newline may be escaped within a table
-        newline = self.escape('\n', self.in_table, self.in_literal_block)
-        self.body.append(newline)
-        self.body.append(newline)
-#         if (not isinstance(node.parent, nodes.list_item) and
-#             not self.in_table):
-#             self.body.append(newline)
+        newline = self.escape('\n')
+
+        if (not isinstance(node.parent, nodes.list_item) and
+            not self.in_table):
+            self.body.append(newline)
+            self.body.append(newline)
         self.in_paragraph = False            
 
     ##
@@ -164,6 +164,9 @@ class WikiTranslator(nodes.NodeVisitor):
     # Title/Section
     #
     def visit_section(self, node):
+        if node['ids']:
+            assert len(node['ids']) == 1
+            self.context.append(node['ids'][0])
         self.section_level += 1
         self.body.append('\n')
 
@@ -177,8 +180,17 @@ class WikiTranslator(nodes.NodeVisitor):
         1 is the highest thus top most title.
         """
         pass
+
+    def title_anchor(self, title):
+        """A method which returns the anchor which will be autogenerated
+        for title.
+        """
+        return title
     
     def visit_title(self, node):
+        if self.context:
+            refid = self.title_anchor(node.astext())
+            self.section_refs[self.context.pop()] = refid
         self.body.append(self.title_prefix())
 
     def depart_title(self, node):
@@ -193,10 +205,12 @@ class WikiTranslator(nodes.NodeVisitor):
     def visit_literal(self, node):
         if self.literal_start:
             self.body.append(self.literal_start)
+        self.in_literal = True
         
     def depart_literal(self, node):
         if self.literal_end:
             self.body.append(self.literal_end)
+        self.in_literal = False            
 
     def visit_emphasis(self, node):
         if self.emphasis_start:
@@ -296,7 +310,7 @@ class WikiTranslator(nodes.NodeVisitor):
             self.list_start = True
         self.list_level += 1
         self.list_type.append('bullet')
-
+        
     def depart_bullet_list(self, node):
         self.list_level -= 1
         self.list_type.pop()
@@ -349,13 +363,21 @@ class WikiTranslator(nodes.NodeVisitor):
     # Definition lists
     #
     def visit_definition_list(self, node):
-        pass
+        if self.list_level == 0:
+            self.list_start = True
+        self.list_level += 1
+        self.in_definition_list = True
+        
 
     def depart_definition_list(self, node):
-        pass
+        self.list_level -= 1
+        self.in_definition_list = False
 
     def visit_definition_list_item(self, node):
-        pass
+        if not self.list_start:
+           self.strip()
+           self.body.append('\n')        
+        self.list_start = False
 
     def depart_definition_list_item(self, node):
         pass
@@ -367,12 +389,18 @@ class WikiTranslator(nodes.NodeVisitor):
     def depart_term(self, node):
         if self.definition_term_end:
             self.body.append(self.definition_term_end)
+        else:
+            self.body.append('\n')            
 
     def visit_definition(self, node):
-        pass
+        if self.definition_start:
+            self.body.append(self.definition_start)
 
     def depart_definition(self, node):
-        pass
+        if self.definition_end:
+            self.body.append(self.definition_end)
+        else:
+            self.body.append('\n')                    
     #
     #
     ###
@@ -396,9 +424,8 @@ class WikiTranslator(nodes.NodeVisitor):
             self.table_entry_width += 1
 
     def depart_entry(self, node):
-        # Remove paragraph newline
-        self.body.pop()
-    
+        pass
+
     def visit_row(self, node):
         pass
 
@@ -498,43 +525,34 @@ class WikiTranslator(nodes.NodeVisitor):
     ###
     # Links
     #
-    def create_link(self, id, uri, name, text):
+    def create_link(self, id=None, uri=None, name=None, text=None):
         """Must return Markup text for a link to something.
         """
         pass
-    
+
     def visit_reference(self, node):
-        text = self.create_link(node.get('refid'), node.get('refuri'),
-                                node.get('name'), node.astext())
-        if text:
-            self.context.append(text)
-
+        self.context.append((self.create_link,
+                            node.get('refid'), node.get('refuri'),
+                            node.get('name'), node.astext()))
+        
     def depart_reference(self, node):
-        if self.context:
-            self.body.pop()
-            self.body.extend(self.context)
-            self.context = list()
+        self.body.pop()
+        self.body.append(self.context.pop())
 
-    def create_anchor(self, id, uri, name, text):
+    def create_anchor(self, id=None, uri=None, name=None, text=None):
         """Must return Markup for an anchor."""
         pass
     
     def visit_target(self, node):
         if node.get('anonymous'):
             return
-        import pdb; pdb.set_trace()
-        text = self.create_anchor(node.get('refid'), node.get('refuri'),
-                                  node.get('name'), node.astext())
-        if text:
-            self.context.append(text)
-            self.context.append('\n')
+        self.context.append((self.create_anchor,
+                            node.get('refid'), node.get('refuri'),
+                            node.get('name'), node.astext()))        
     
     def depart_target(self, node):
-        import pdb; pdb.set_trace()
-        if self.context:
-            self.body.pop()
-            self.body.extend(self.context)
-            self.context = list()
+        self.body.extend(self.context)
+        self.context = list()
     #
     #
     ###
@@ -551,7 +569,6 @@ class WikiTranslator(nodes.NodeVisitor):
                 
     def depart_image(self, node):
         pass
-
     #
     # End Image
     ###
@@ -566,16 +583,28 @@ class WikiTranslator(nodes.NodeVisitor):
         pass
 
     def visit_footnote_reference(self, node):
-        pass
+        self.body.append(self.escape('['))
+        refid = '%s%s' % (self.footnote_prefix, node.astext())
+        self.footnote_refs[node.astext()] = refid
+        self.context.append((self.create_link,
+                            refid, node.get('refuri'),
+                            node.get('name'), node.astext()))        
 
     def depart_footnote_reference(self, node):
-        pass
+        self.body.pop()
+        self.body.append(self.context.pop())        
+        self.body.append(self.escape(']'))
 
     def visit_label(self, node):
-        pass
-
+        refid = self.footnote_refs.get(node.astext())
+        self.body.append((self.create_anchor,
+                          refid, node.get('refuri'),
+                          node.get('name'), node.astext()))
+        self.body.append(' ')
+        self.body.append(self.escape('['))
+        
     def depart_label(self, node):
-        pass
+        self.body.append(self.escape(']'))
     #
     # End footnote
     ###
@@ -674,13 +703,17 @@ class WikiTranslator(nodes.NodeVisitor):
         pass
 
     def admonition(self, name):
+        if not self.body[-1][-1].isspace():
+            self.body.append('\n')
+            self.body.append('\n')
         if self.strong_start:
             self.body.append(self.strong_start)
         self.body.append(name.title())
         if self.strong_end:
             self.body.append(self.strong_end)
         self.body.append(':')
-        self.body.append('\n\n')
+        self.body.append('\n')
+        self.body.append('\n')
     #
     # End Admonition
     ###
@@ -694,8 +727,9 @@ class TWikiTranslator(WikiTranslator):
         self.emphasis_end = '_'
         self.strong_start = '*'
         self.strong_end = '*'
-        self.literal_start = '='
-        self.literal_end = '='
+        # Inline literal's *must* begin and end with a space
+        self.literal_start = ' ='
+        self.literal_end = '= '
         self.title_reference_start = '_'
         self.title_reference_end = '_'
         self.literal_block_start = '<verbatim>'
@@ -707,11 +741,13 @@ class TWikiTranslator(WikiTranslator):
         self.block_quote_end = '</blockquote></literal>'
         self.definition_term_start = '   $ '
         self.definition_term_end = ': '
+        self.section_anchors = list()          # Track section anchors we have seen
+        self.footnote_prefix = 'FootNote'
         
-    def escape(self, text, in_table, in_literal_block):
-        if in_table:
+    def escape(self, text):
+        if self.in_table:
             text = text.replace('\n', ' \\\n')
-        if not in_literal_block:
+        if not self.in_literal_block:
             text = text.replace('<', '&lt;')
             text = text.replace('>', '&gt;')
         return text
@@ -719,13 +755,30 @@ class TWikiTranslator(WikiTranslator):
     def title_prefix(self):
         return '---%s ' % ('+' * self.section_level)
 
+    def title_anchor(self, title):
+        count = 0
+        prefix = '_'.join(title.strip('()?:').split())
+        while True:
+            if count:
+                anchor = '%s_AN%d' % (prefix, count)
+            else:
+                anchor = prefix
+            if anchor not in self.section_anchors:
+                break
+            count += 1
+        self.section_anchors.append(anchor)
+        return anchor
+    
     def list_prefix(self, type):
         if self.in_table:
             return '<li>'
+        depth = self.list_level
+        if self.in_definition_list:
+            depth -= 1
         if type == 'bullet':
-            return '%s* ' % (' ' * (self.list_level * self._list_indent))
+            return '%s* ' % (' ' * (depth * self._list_indent))
         if type == 'enumerated':
-            return '%s1. ' % (' ' * (self.list_level * self._list_indent))
+            return '%s1. ' % (' ' * (depth * self._list_indent))
 
     ###
     # TWiki doesn't support lists in using Wiki syntax within
@@ -784,12 +837,15 @@ class TWikiTranslator(WikiTranslator):
     ###
     # Links
     #
-    def create_link(self, id, uri, name, text):
+    def create_link(self, id=None, uri=None, name=None, text=None):
         if not name:
             name = text
         if id:
+            # Sections have special anchors
+            if id in self.section_refs:
+                id = self.section_refs[id]
             if name:
-                return '[[%s][%s]]' % (id, name)
+                return '[[#%s][%s]]' % (id, name)
             else:
                 return '[[#%s]]' % id
         if uri:
@@ -800,7 +856,7 @@ class TWikiTranslator(WikiTranslator):
             else:
                 return '[[%s]]' % uri
 
-    def create_anchor(self, id, uri, name, text):
+    def create_anchor(self, id=None, uri=None, name=None, text=None):
         if id:
             return '#%s' % id
         if uri:
@@ -831,32 +887,41 @@ class ConfluenceTranslator(WikiTranslator):
         self.toc = '{toc}'
         self.block_quote_start = '{quote}'
         self.block_quote_end = '{quote}'
-        self.definition_term_start = '*'
-        self.definition_term_end = '* '
+        self.definition_start = '{quote}'
+        self.definition_end = '{quote}'
+        self.definition_term_start = None
+        self.definition_term_end = None
         self.anchor_start = '[#'
         self.anchor_end = ']'
         self.link_start = None
         self.link_end = None
         self.link_name_start = None
-        self.link_name_end = None        
+        self.link_name_end = None
+        self.footnote_prefix = 'foot-note-'
         
-    def escape(self, text, in_table, in_literal_block):
+    def escape(self, text):
         text = text.replace('[', '\[')
         text = text.replace(']', '\]')
         text = text.replace('{', '\{')
         text = text.replace('}', '\}')
+        if self.in_literal:
+            text = text.replace('*', '\*')
+            text = text.replace(r'\\*', '\*') # incase we already escaped
         return text
     
     def title_prefix(self):
         return 'h%s. ' % self.section_level
 
     def list_prefix(self, type):
+        depth = self.list_level
+        if self.in_definition_list:
+            depth -= 1
         if type == 'bullet':
-            return '%s ' % ('*' * self.list_level)
+            return '%s ' % ('*' * depth)
         elif type == 'enumerated':
-            return '%s ' % ('#' * self.list_level)
+            return '%s ' % ('#' * depth)
 
-    def create_link(self, id, uri, name, text):
+    def create_link(self, id=None, uri=None, name=None, text=None):
         if not name:
             name = text
         if id:
@@ -877,7 +942,7 @@ class ConfluenceTranslator(WikiTranslator):
             else:
                 return '[#%s]' % id 
 
-    def create_anchor(self, id, uri, name, text):
+    def create_anchor(self, id=None, uri=None, name=None, text=None):
         if id:
             return '{anchor:%s}' % id
         if uri:
