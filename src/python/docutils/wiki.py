@@ -62,7 +62,6 @@ class WikiTranslator(nodes.NodeVisitor):
         self.table_entry_width = 0
         self.table_header_sep = None
         self.table_entry_sep = None
-        self.options = list()
         self.description = None
         self.toc = None
         self.block_quote_start = None
@@ -125,7 +124,7 @@ class WikiTranslator(nodes.NodeVisitor):
     
     def depart_Text(self, node):
         pass
-
+    
     def visit_comment(self, node):
         raise nodes.SkipNode
 
@@ -165,8 +164,7 @@ class WikiTranslator(nodes.NodeVisitor):
     #
     def visit_section(self, node):
         if node['ids']:
-            assert len(node['ids']) == 1
-            self.context.append(node['ids'][0])
+            self.context.append(node['ids'])
         self.section_level += 1
         self.body.append('\n')
 
@@ -189,8 +187,9 @@ class WikiTranslator(nodes.NodeVisitor):
     
     def visit_title(self, node):
         if self.context:
-            refid = self.title_anchor(node.astext())
-            self.section_refs[self.context.pop()] = refid
+            anchor = self.title_anchor(node.astext())
+            for refid in self.context.pop():
+                self.section_refs[refid] = anchor
         self.body.append(self.title_prefix())
 
     def depart_title(self, node):
@@ -276,6 +275,12 @@ class WikiTranslator(nodes.NodeVisitor):
                 self.body.append('\n')
             self.body.append(self.literal_block_end)
             self.body.append('\n')
+
+    def visit_attribution(self, node):
+        self.visit_block_quote(node)
+        
+    def depart_attribution(self, node):
+        self.depart_block_quote(node)
     #
     #
     ##
@@ -314,6 +319,8 @@ class WikiTranslator(nodes.NodeVisitor):
     def depart_bullet_list(self, node):
         self.list_level -= 1
         self.list_type.pop()
+        if self.list_level == 0:
+            self.body.append('\n')
         
     def visit_enumerated_list(self, node):
         if self.list_level == 0:
@@ -324,6 +331,9 @@ class WikiTranslator(nodes.NodeVisitor):
     def depart_enumerated_list(self, node):
         self.list_level -= 1
         self.list_type.pop()
+        if self.list_level == 0:
+            self.body.append('\n')
+        
     #
     #
     ###
@@ -491,6 +501,7 @@ class WikiTranslator(nodes.NodeVisitor):
         pass
 
     def visit_option_group(self, node):
+        self.body.append(self.option_group_start)
         self.body.append(self.literal_start)
     
     def depart_option_group(self, node):
@@ -498,26 +509,39 @@ class WikiTranslator(nodes.NodeVisitor):
         if self.body[-1] == ', ':
             self.body.pop()
         self.body.append(self.literal_end)
-        self.body.append('\n\n')
+        self.body.append(self.option_group_end)
     
     def visit_option_list(self, node):
-        pass
-    
+        if self.option_list_start:
+            self.body.append(self.option_list_start)
+        self.body.append(self.option_list_item_start)
+        self.body.append(self.option_group_start)
+        self.body.append(self.strong_start)
+        self.body.append("OPTION")
+        self.body.append(self.strong_end)
+        self.body.append(self.option_group_end)
+        self.body.append(self.description_start)
+        self.body.append(self.strong_start)
+        self.body.append("DESCRIPTION")
+        self.body.append(self.strong_end)
+        self.body.append(self.description_end)
+        self.body.append(self.option_list_item_end)
+        
     def depart_option_list(self, node):
-        pass
+        if self.option_list_end:
+            self.body.append(self.option_list_end)
     
     def visit_option_list_item(self, node):
-        self.options = list()
-        self.body.append('\n')
+        self.body.append(self.option_list_item_start)
     
     def depart_option_list_item(self, node):
-        pass
+        self.body.append(self.option_list_item_end)
     
     def visit_description(self, node):
-        pass
+        self.body.append(self.description_start)
     
     def depart_description(self, node):
-        pass
+        self.body.append(self.description_end)
     #
     #
     ###
@@ -604,7 +628,7 @@ class WikiTranslator(nodes.NodeVisitor):
         self.body.append(self.escape('['))
         
     def depart_label(self, node):
-        self.body.append(self.escape(']'))
+        self.body.append(self.escape('] '))
     #
     # End footnote
     ###
@@ -617,24 +641,72 @@ class WikiTranslator(nodes.NodeVisitor):
     
     def depart_docinfo(self, node):
         pass
+    
+    def visit_docinfo_item(self, name):
+        self.body.append(self.table_entry_sep)
+        self.body.append(self.strong_start)
+        self.body.append(name)
+        self.body.append(self.strong_end)
+        self.body.append(':')
+        self.body.append(self.table_entry_sep)
+
+    def depart_docinfo_item(self):
+        self.body.append(self.table_entry_sep)
+        self.body.append('\n')
 
     def visit_version(self, node):
-        self.body.append(self.strong_start)
-        self.body.append('Version')
-        self.body.append(self.strong_end)
-        self.body.append(': ')
+        self.visit_docinfo_item('Version')
     
     def depart_version(self, node):
-        self.body.append('\n\n')
+        self.depart_docinfo_item()
     
     def visit_author(self, node):
-        self.body.append(self.strong_start)
-        self.body.append('Author')
-        self.body.append(self.strong_end)
-        self.body.append(': ')
+        self.visit_docinfo_item('Author')
     
     def depart_author(self, node):
-        self.body.append('\n\n')
+        self.depart_docinfo_item()
+
+    def visit_authors(self, node):
+        self.visit_docinfo_item('Authors')
+    
+    def depart_authors(self, node):
+        self.depart_docinfo_item()
+        
+    def visit_contact(self, node):
+        self.visit_docinfo_item('Contact')
+
+    def depart_contact(self, node):
+        self.depart_docinfo_item()
+
+    def visit_revision(self, node):
+        self.visit_docinfo_item('Revision')
+
+    def depart_revision(self, node):
+        self.depart_docinfo_item()
+
+    def visit_date(self, node):
+        self.visit_docinfo_item('Date')
+
+    def depart_date(self, node):
+        self.depart_docinfo_item()
+
+    def visit_copyright(self, node):
+        self.visit_docinfo_item('Copyright')
+
+    def depart_copyright(self, node):
+        self.depart_docinfo_item()
+
+    def visit_organization(self, node):
+        self.visit_docinfo_item('Organization')
+
+    def depart_organization(self, node):
+        self.depart_docinfo_item()
+
+    def visit_status(self, node):
+        self.visit_docinfo_item('Status')
+
+    def depart_status(self, node):
+        self.depart_docinfo_item()        
     #
     # End Docinfo
     ###
@@ -643,58 +715,58 @@ class WikiTranslator(nodes.NodeVisitor):
     # Start Admonition
     #
     def visit_attention(self, node):
-        self.admonition('attention')
+        self.admonition_start('attention')
 
     def depart_attention(self, node):
-        pass
+        self.admonition_end('attention')
 
     def visit_caution(self, node):
-        self.admonition('caution')
+        self.admonition_start('caution')
 
     def depart_caution(self, node):
-        pass
+        self.admonition_end('caution')
 
     def visit_danger(self, node):
-        self.admonition('danger')
+        self.admonition_start('danger')
 
     def depart_danger(self, node):
-        pass
+        self.admonition_end('danger')
 
     def visit_error(self, node):
-        self.admonition('error')
+        self.admonition_start('error')
 
     def depart_error(self, node):
-        pass
+        self.admonition_end('error')
 
     def visit_hint(self, node):
-        self.admonition('hint')
+        self.admonition_start('hint')
 
     def depart_hint(self, node):
-        pass
+        self.admonition_end('hint')
 
     def visit_important(self, node):
-        self.admonition('important')
+        self.admonition_start('important')
 
     def depart_important(self, node):
-        pass
+        self.admonition_end('important')
 
     def visit_note(self, node):
-        self.admonition('note')
+        self.admonition_start('note')
 
     def depart_note(self, node):
-        pass
+        self.admonition_end('note')
 
     def visit_tip(self, node):
-        self.admonition('tip')
+        self.admonition_start('tip')
 
     def depart_tip(self, node):
-        pass
+        self.admonition_end('tip')
 
     def visit_warning(self, node):
-        self.admonition('warning')
+        self.admonition_start('warning')
 
     def depart_warning(self, node):
-        pass
+        self.admonition_end('warning')
 
     def visit_admonition(self, node):
         pass
@@ -702,7 +774,7 @@ class WikiTranslator(nodes.NodeVisitor):
     def depart_admonition(self, node):
         pass
 
-    def admonition(self, name):
+    def admonition_start(self, name):
         if not self.body[-1][-1].isspace():
             self.body.append('\n')
             self.body.append('\n')
@@ -714,9 +786,13 @@ class WikiTranslator(nodes.NodeVisitor):
         self.body.append(':')
         self.body.append('\n')
         self.body.append('\n')
+
+    def admonition_end(self, name):
+        pass
     #
     # End Admonition
     ###
+
     
 class TWikiTranslator(WikiTranslator):
 
@@ -743,6 +819,15 @@ class TWikiTranslator(WikiTranslator):
         self.definition_term_end = ': '
         self.section_anchors = list()          # Track section anchors we have seen
         self.footnote_prefix = 'FootNote'
+        self.option_list_start = '<table border="1"><col width="20%"/><col width="80%"/>'
+        self.option_list_end = '</table>'
+        self.option_list_item_start = '<tr>'
+        self.option_list_item_end = '</tr>'
+        self.option_group_start = '<td> '
+        self.option_group_end = ' </td>'
+        self.description_start = '<td> '
+        self.description_end = ' </td>'
+        
         
     def escape(self, text):
         if self.in_table:
@@ -898,20 +983,41 @@ class ConfluenceTranslator(WikiTranslator):
         self.link_name_start = None
         self.link_name_end = None
         self.footnote_prefix = 'foot-note-'
+        self.option_list_start = None
+        self.option_list_end = None
+        self.option_list_item_start = '{section:border=true}'
+        self.option_list_item_end = '{section}'
+        self.option_group_start = '{column:width=20%}'
+        self.option_group_end = '{column}'
+        self.description_start = '{column:width=80%}'
+        self.description_end = '{column}'
+        self.section_anchors = list()          # Track section anchors we have seen
         
     def escape(self, text):
-        text = text.replace('[', '\[')
-        text = text.replace(']', '\]')
-        text = text.replace('{', '\{')
-        text = text.replace('}', '\}')
+        if not (self.in_literal or self.in_literal_block):
+            text = text.replace('[', '\[')
+            text = text.replace(']', '\]')
+            text = text.replace('{', '\{')
+            text = text.replace('}', '\}')
+            text = text.replace(':', '&#58;')
         if self.in_literal:
             text = text.replace('*', '\*')
             text = text.replace(r'\\*', '\*') # incase we already escaped
+        if not self.in_literal_block:
+            text = text.replace('-', '\-')
+            text = text.replace('!', '\!')
         return text
     
     def title_prefix(self):
         return 'h%s. ' % self.section_level
 
+    def title_anchor(self, title):
+        count = 0
+        anchor = ''.join(title.split())
+        anchor = anchor.strip('_')
+        anchor = anchor.replace(':', '&#58;')
+        return anchor
+    
     def list_prefix(self, type):
         depth = self.list_level
         if self.in_definition_list:
@@ -925,18 +1031,21 @@ class ConfluenceTranslator(WikiTranslator):
         if not name:
             name = text
         if id:
+            # Sections have special anchors
+            if id in self.section_refs:
+                id = self.section_refs[id]            
             if name:
                 return '[%s|#%s]' % (name, id)
             else:
                 return '[#%s]' % id
         if uri:
             if 'mail' in uri:
-                pass
+                return '[%s|%s]' % (name, uri)
             elif name:
                 return '[%s|%s]' % (name, uri)
             else:
                 return '[%s]' % uri        
-        if id:
+        if id: # XXX Why?
             if text:
                 return '[%s|#%s]' % (text, id)
             else:
@@ -950,3 +1059,23 @@ class ConfluenceTranslator(WikiTranslator):
         
     def image(self, uri):
         return '!%s!' % uri
+
+    def admonition_start(self, name):
+        if name in ['note', 'important', 'attention']:
+            self.body.append('{note:title=%s}' % name.title())
+        elif name in ['warning', 'caution', 'danger', 'error']:
+            self.body.append('{warning:title=%s}' % name.title())
+        elif name in ['info']:
+            self.body.append('{info:title=%s}' % name.title())
+        elif name in ['tip', 'hint']:
+            self.body.append('{tip:title=%s}' % name.title())            
+
+    def admonition_end(self, name):
+        if name in ['note', 'important', 'attention']:
+            self.body.append('{note}')
+        elif name in ['warning', 'caution', 'danger', 'error']:
+            self.body.append('{warning}')
+        elif name in ['info']:
+            self.body.append('{info}')
+        elif name in ['tip', 'hint']:
+            self.body.append('{tip}')
