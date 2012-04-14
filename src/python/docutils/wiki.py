@@ -55,7 +55,7 @@ class WikiTranslator(nodes.NodeVisitor):
         self.in_literal_block = False
         self.literal_block_start = None
         self.literal_block_end = None
-        self.literal_block_indent = 2
+        self._literal_block_indent = 0
         self.in_table = False
         self.in_table_header = False
         self.table_header_width = 0
@@ -72,6 +72,7 @@ class WikiTranslator(nodes.NodeVisitor):
         self.definition_term_start = None
         self.definition_term_end = None
         self.in_paragraph = False
+        self.first_list_paragraph = False
         self.footnote_refs = dict()
 
     def astext(self):
@@ -112,16 +113,18 @@ class WikiTranslator(nodes.NodeVisitor):
     def visit_Text(self, node):
         text = node.astext()
         if (self.in_paragraph or self.list_level) and not self.in_literal_block:
-            text = text.replace('\n', ' ')
+            text = text.replace('\n', ' ') # join lines split in a paragraph
         text = self.escape(text)
         if self.in_literal_block:
-            # Add indent space to all literal blocks. Take into account
-            # the depth of a list.
-            space = ' ' * (self.literal_block_indent * (self.list_level * 3))
-            text = ''.join(['%s%s' % (space, line)
+            text = ''.join(['%s%s' % (self.literal_block_indent(), line)
                             for line in text.splitlines(True)])
+        elif (isinstance(self.body[-1], basestring) and
+              self.body[-1].endswith('\n')):
+            if ((self.in_paragraph and self.list_level) and
+                not self.first_list_paragraph):
+                text = '%s%s' % (self.list_indent(), text)
         self.body.append(text)
-    
+        
     def depart_Text(self, node):
         pass
     
@@ -137,12 +140,12 @@ class WikiTranslator(nodes.NodeVisitor):
     def depart_paragraph(self, node):
         # newline may be escaped within a table
         newline = self.escape('\n')
-
-        if (not isinstance(node.parent, nodes.list_item) and
-            not self.in_table):
+        if not self.in_table:
+            if not isinstance(node.parent, nodes.list_item):
+                self.body.append(newline)
             self.body.append(newline)
-            self.body.append(newline)
-        self.in_paragraph = False            
+        self.in_paragraph = False
+        self.first_list_paragraph = False
 
     ##
     # Table of contents
@@ -261,11 +264,18 @@ class WikiTranslator(nodes.NodeVisitor):
                 self.body.append('\n')
             self.body.append(self.block_quote_end)
             self.body.append('\n')
-            
+
+    def literal_block_indent(self):
+        """Add indent space to all literal blocks. Take into account
+        the depth of a list.
+        """
+        return ' ' * self._literal_block_indent
+
     def visit_literal_block(self, node):
         self.in_literal_block = True
         if self.literal_block_start:
-            self.body.append(self.literal_block_start)
+            self.body.append('%s%s' % (self.list_indent(),
+                                       self.literal_block_start))
             self.body.append('\n')
 
     def depart_literal_block(self, node):
@@ -273,7 +283,8 @@ class WikiTranslator(nodes.NodeVisitor):
         if self.literal_block_end:
             if not self.body[-1].endswith('\n'):
                 self.body.append('\n')
-            self.body.append(self.literal_block_end)
+            self.body.append('%s%s' % (self.list_indent(),
+                                       self.literal_block_end))
             self.body.append('\n')
 
     def visit_attribution(self, node):
@@ -299,13 +310,22 @@ class WikiTranslator(nodes.NodeVisitor):
         """
         pass
 
+    def list_indent(self):
+        """Returns a whitespace string which will indent text to the
+        current list level.
+        """
+        if self.list_level:
+            return (' ' * (self.list_level)) + ' '
+        return ''
+
     def visit_list_item(self, node):
         # No extra whitespace between list items
         if not self.list_start:
-           self.strip()
-           self.body.append('\n')
+            self.strip()
+            self.body.append('\n')
         self.body.append(self.list_prefix(self.list_type[-1]))
         self.list_start = False
+        self.first_list_paragraph = True
 
     def depart_list_item(self, node):
         pass
@@ -715,66 +735,60 @@ class WikiTranslator(nodes.NodeVisitor):
     # Start Admonition
     #
     def visit_attention(self, node):
-        self.admonition_start('attention')
+        self.visit_admonition(node, 'attention')
 
     def depart_attention(self, node):
-        self.admonition_end('attention')
+        self.depart_admonition(node, 'attention')
 
     def visit_caution(self, node):
-        self.admonition_start('caution')
+        self.visit_admonition(node, 'caution')
 
     def depart_caution(self, node):
-        self.admonition_end('caution')
+        self.depart_admonition(node, 'caution')
 
     def visit_danger(self, node):
-        self.admonition_start('danger')
+        self.visit_admonition(node, 'danger')
 
     def depart_danger(self, node):
-        self.admonition_end('danger')
+        self.depart_admonition(node, 'danger')
 
     def visit_error(self, node):
-        self.admonition_start('error')
+        self.visit_admonition(node, 'error')
 
     def depart_error(self, node):
-        self.admonition_end('error')
+        self.depart_admonition(node, 'error')
 
     def visit_hint(self, node):
-        self.admonition_start('hint')
+        self.visit_admonition(node, 'hint')
 
     def depart_hint(self, node):
-        self.admonition_end('hint')
+        self.depart_admonition(node, 'hint')
 
     def visit_important(self, node):
-        self.admonition_start('important')
+        self.visit_admonition(node, 'important')
 
     def depart_important(self, node):
-        self.admonition_end('important')
+        self.depart_admonition(node, 'important')
 
     def visit_note(self, node):
-        self.admonition_start('note')
+        self.visit_admonition(node, 'note')
 
     def depart_note(self, node):
-        self.admonition_end('note')
+        self.depart_admonition(node, 'note')
 
     def visit_tip(self, node):
-        self.admonition_start('tip')
+        self.visit_admonition(node, 'tip')
 
     def depart_tip(self, node):
-        self.admonition_end('tip')
+        self.depart_admonition(node, 'tip')
 
     def visit_warning(self, node):
-        self.admonition_start('warning')
+        self.visit_admonition(node, 'warning')
 
     def depart_warning(self, node):
-        self.admonition_end('warning')
+        self.depart_admonition(node, 'warning')
 
-    def visit_admonition(self, node):
-        pass
-
-    def depart_admonition(self, node):
-        pass
-
-    def admonition_start(self, name):
+    def visit_admonition(self, node, name):
         if not self.body[-1][-1].isspace():
             self.body.append('\n')
             self.body.append('\n')
@@ -787,7 +801,7 @@ class WikiTranslator(nodes.NodeVisitor):
         self.body.append('\n')
         self.body.append('\n')
 
-    def admonition_end(self, name):
+    def depart_admonition(self, node, name):
         pass
     #
     # End Admonition
@@ -798,7 +812,8 @@ class TWikiTranslator(WikiTranslator):
 
     def __init__(self, document):
         WikiTranslator.__init__(self, document)
-        self._list_indent = 3
+        self._list_tag_indent = 3
+        self._literal_block_indent = 0
         self.emphasis_start = '_'
         self.emphasis_end = '_'
         self.strong_start = '*'
@@ -853,6 +868,11 @@ class TWikiTranslator(WikiTranslator):
             count += 1
         self.section_anchors.append(anchor)
         return anchor
+
+    def list_indent(self):
+        if self.list_level:
+            return (' ' * ((self.list_level * self._list_tag_indent)+1)) + ' '
+        return ''
     
     def list_prefix(self, type):
         if self.in_table:
@@ -861,9 +881,9 @@ class TWikiTranslator(WikiTranslator):
         if self.in_definition_list:
             depth -= 1
         if type == 'bullet':
-            return '%s* ' % (' ' * (depth * self._list_indent))
+            return '%s* ' % (' ' * (depth * self._list_tag_indent))
         if type == 'enumerated':
-            return '%s1. ' % (' ' * (depth * self._list_indent))
+            return '%s1. ' % (' ' * (depth * self._list_tag_indent))
 
     ###
     # TWiki doesn't support lists in using Wiki syntax within
@@ -1060,7 +1080,7 @@ class ConfluenceTranslator(WikiTranslator):
     def image(self, uri):
         return '!%s!' % uri
 
-    def admonition_start(self, name):
+    def visit_admonition(self, node, name):        
         if name in ['note', 'important', 'attention']:
             self.body.append('{note:title=%s}' % name.title())
         elif name in ['warning', 'caution', 'danger', 'error']:
@@ -1070,7 +1090,7 @@ class ConfluenceTranslator(WikiTranslator):
         elif name in ['tip', 'hint']:
             self.body.append('{tip:title=%s}' % name.title())            
 
-    def admonition_end(self, name):
+    def depart_admonition(self, node, name):        
         if name in ['note', 'important', 'attention']:
             self.body.append('{note}')
         elif name in ['warning', 'caution', 'danger', 'error']:
