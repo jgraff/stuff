@@ -1,6 +1,23 @@
+_HELP_DOC=
 
-buildbot_shell()
+add_help()
 {
+    _HELP_DOC="$1 - $2:$_HELP_DOC"
+}
+
+show_help()
+{
+   OIFS=$IFS
+   IFS=:
+   for entry in $_HELP_DOC; do
+     printf "   %s\n" $entry
+   done
+   IFS=$OIFS
+}
+
+add_help buildbot_shell "Spawn a new buildbot shell using a prebuilt toolchain"
+buildbot_shell()
+{   
     OLD_CWD=$PWD	
     OLD_PATH=$PATH
     OLD_LD_LIBRARY_PATH=$LD_LIBRARY_PATH
@@ -12,10 +29,23 @@ buildbot_shell()
     cd $HOME/buildbot
 }
 
+add_help buildbot_exit_shell "Exit an existing Spawned buildbot shell"
 buildbot_exit_shell()
 {
     PATH=$OLD_PATH
     LD_LIBRARY_PATH=$OLD_LD_LIBRARY_PATH
     export PATH LD_LIBRARY_PATH
     cd $OLD_CWD
+}
+
+add_help rsync_work_docs "Transfer Work docs"
+rsync_work_docs()
+{
+   rsync -av --delete --exclude private /Volumes/Work/docs jgraff@xsjhd-odin:.
+}
+
+add_help git_push "Push current repo to master"
+git_push()
+{
+  git push origin master
 }
