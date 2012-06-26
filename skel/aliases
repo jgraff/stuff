@@ -1,0 +1,2 @@
+alias emacs="emacs -nw"
+alias xemacs="emacs -nw"

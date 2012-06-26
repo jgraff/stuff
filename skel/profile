@@ -1,0 +1,4 @@
+export TERM=xterm-256color
+
+. $HOME/stuff/skel/aliases
+. $HOME/stuff/skel/functions
